@@ -118,6 +118,23 @@ function isLikelyLogo(imgTag: string, src: string): boolean {
 function extractLogoUrl(html: string, baseUrl: string): string | null {
   const seen = new Set<string>();
 
+  // Try to get the highest resolution version of the image URL
+  function upgradeToFullRes(url: string): string {
+    let u = url;
+    // WordPress: remove ?fit=WxH, ?resize=WxH, ?w=N, ?h=N size constraints
+    u = u.replace(/[?&](?:fit|resize|w|h)=[^&]*/gi, "");
+    // Shopify: _410x.png → .png (remove size suffix)
+    u = u.replace(/_\d+x(?:\d+)?(\.[a-z]+)/i, "$1");
+    // Clean up malformed query strings after parameter removal
+    // If all params before & were removed, the first & should become ?
+    u = u.replace(/\?&/, "?").replace(/\?$/, "");
+    // If url has &param but no ?, fix it: file.png&ssl=1 → file.png?ssl=1
+    if (!u.includes("?") && u.includes("&")) {
+      u = u.replace("&", "?");
+    }
+    return u;
+  }
+
   function resolve(src: string): string | null {
     try {
       // Decode HTML entities first (e.g. &#038; → &)
@@ -130,9 +147,11 @@ function extractLogoUrl(html: string, baseUrl: string): string | null {
       // Reject very short filenames (likely icons: x.png, a.svg)
       const filename = resolved.split("/").pop()?.split("?")[0] || "";
       if (filename.length < 5 && !/logo/i.test(resolved)) return null;
-      if (seen.has(resolved)) return null;
-      seen.add(resolved);
-      return resolved;
+      // Upgrade to full resolution
+      const fullRes = upgradeToFullRes(resolved);
+      if (seen.has(fullRes)) return null;
+      seen.add(fullRes);
+      return fullRes;
     } catch {
       return null;
     }
@@ -286,44 +305,37 @@ export async function GET(request: NextRequest) {
   const colorEntries: ColorEntry[] = [];
   let match;
 
-  // ─── Priority 1: Button / CTA colors (strongest brand signal) ───
-  // Look for background-color on elements with button/btn/cta in class or tag
+  // ═══════════════════════════════════════════════════════════════════════
+  // COLOR PRIORITY (user's mental model):
+  //   P1: Buttons / CTAs — strongest brand signal, the "action color"
+  //   P1: Global link color (a { color }) + repeated inline link colors
+  //   P2: Footer link colors / clickable element colors
+  //   P3: CSS brand variables (--primary, --accent, etc.)
+  //   P4: Meta theme-color / tile-color
+  //   P5: Header/nav background, hover colors
+  //   P6: All hex by frequency (weakest signal)
+  // Logo pixel colors are merged on the client as a final fallback.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ─── P1: Button / CTA background colors ───
   const buttonPatterns = [
-    // Inline styles on button-like elements
     /(?:<button|<a[^>]*class=["'][^"']*(?:btn|button|cta|primary)[^"']*["'])[^>]*style=["'][^"']*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // CSS classes with btn/button/cta in name
-    /\.(?:btn|button|cta|primary-btn|submit|book|schedule|contact)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // background-color properties near button/btn keywords
+    /\.(?:btn|button|cta|primary-btn|submit|book|schedule|contact|appointment|request)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
     /(?:btn|button|cta|submit|primary)[a-z0-9_-]*[^{]{0,60}\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
   ];
   for (const pattern of buttonPatterns) {
     while ((match = pattern.exec(html)) !== null) {
-      colorEntries.push({ hex: normalizeHex(match[1]), priority: 1, count: 15 });
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 1, count: 20 });
     }
   }
 
-  // ─── Priority 1: Meta theme-color (intentionally set brand color) ───
-  const themeColorMatch = html.match(/<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i);
-  if (themeColorMatch?.[1]?.startsWith("#")) {
-    colorEntries.push({ hex: normalizeHex(themeColorMatch[1]), priority: 1, count: 12 });
-  }
-  const tileColorMatch = html.match(/<meta[^>]*name=["']msapplication-TileColor["'][^>]*content=["']([^"']+)["']/i);
-  if (tileColorMatch?.[1]?.startsWith("#")) {
-    colorEntries.push({ hex: normalizeHex(tileColorMatch[1]), priority: 1, count: 12 });
+  // ─── P1: Global CSS link color (a { color: }) — site-wide brand decision ───
+  const globalLinkColor = /\ba\s*\{[^}]*?color\s*:\s*(#[0-9a-fA-F]{3,8})/i.exec(html);
+  if (globalLinkColor) {
+    colorEntries.push({ hex: normalizeHex(globalLinkColor[1]), priority: 1, count: 25 });
   }
 
-  // ─── Priority 2: CSS custom properties with brand/primary/accent names ───
-  // Exclude WordPress preset variables (--wp--preset--*) — those are theme defaults, not clinic brand choices
-  const brandVarRegex = /--(?:brand|primary|secondary|accent|main|theme|color-primary|color-accent|site)[a-z0-9-]*\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
-  const wpPresetVarRegex = /--wp--preset--/;
-  while ((match = brandVarRegex.exec(html)) !== null) {
-    const fullMatch = html.slice(Math.max(0, match.index - 20), match.index + match[0].length);
-    if (wpPresetVarRegex.test(fullMatch)) continue; // skip WP theme presets
-    colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
-  }
-
-  // ─── Priority 1.5: Inline color on <a> tags (repeated = strong brand signal) ───
-  // When many links share the same inline color, it's THE brand color
+  // ─── P1: Inline color on <a> tags (repeated = strong brand signal) ───
   const inlineLinkColorRegex = /<a[^>]*style=["'][^"']*?(?:^|;|"')\s*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
   const inlineLinkColorCounts = new Map<string, number>();
   while ((match = inlineLinkColorRegex.exec(html)) !== null) {
@@ -331,18 +343,20 @@ export async function GET(request: NextRequest) {
     inlineLinkColorCounts.set(hex, (inlineLinkColorCounts.get(hex) || 0) + 1);
   }
   for (const [hex, count] of inlineLinkColorCounts) {
-    // If a color appears on 3+ inline-styled links, it's a very strong brand signal
     const priority = count >= 3 ? 1 : 2;
     colorEntries.push({ hex, priority, count: count * 5 });
   }
 
-  // Also check global CSS: a { color: #xxx } — this is a site-wide brand decision
-  const globalLinkColor = /\ba\s*\{[^}]*?color\s*:\s*(#[0-9a-fA-F]{3,8})/i.exec(html);
-  if (globalLinkColor) {
-    colorEntries.push({ hex: normalizeHex(globalLinkColor[1]), priority: 1, count: 20 });
+  // ─── P2: Footer link colors ───
+  const footerSection = html.match(/<footer[^>]*>([\s\S]*?)<\/footer>/i);
+  if (footerSection?.[1]) {
+    const footerLinkColor = /<a[^>]*style=["'][^"']*?color\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
+    while ((match = footerLinkColor.exec(footerSection[1])) !== null) {
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
+    }
   }
 
-  // Inline style color on elements with cursor:pointer or onclick
+  // ─── P2: Inline style color on clickable elements ───
   const clickableColorPatterns = [
     /<[a-z]+[^>]*(?:onclick|cursor\s*:\s*pointer)[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
     /<[a-z]+[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})[^"']*(?:cursor\s*:\s*pointer)/gi,
@@ -353,15 +367,21 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ─── Priority 3: Link/anchor CSS colors (often brand primary) ───
+  // ─── P3: CSS custom properties (--primary, --accent, etc.) ───
+  // Exclude WordPress preset variables (--wp--preset--*)
+  const brandVarRegex = /--(?:brand|primary|secondary|accent|main|theme|color-primary|color-accent|site)[a-z0-9-]*\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
+  const wpPresetVarRegex = /--wp--preset--/;
+  while ((match = brandVarRegex.exec(html)) !== null) {
+    const ctx = html.slice(Math.max(0, match.index - 20), match.index + match[0].length);
+    if (wpPresetVarRegex.test(ctx)) continue;
+    colorEntries.push({ hex: normalizeHex(match[1]), priority: 3, count: 8 });
+  }
+
+  // ─── P3: Named link/nav CSS classes ───
   const linkPatterns = [
-    // Named link classes
     /\.(?:link|nav-link|menu-link|text-link|read-more|learn-more|view-more)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // a:hover colors (hover state often reveals brand color)
     /\ba:hover\s*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // Heading links, nav items
     /\.(?:nav-item|menu-item|nav-active|active)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // border-bottom/underline on links (sometimes used as brand accent)
     /\ba[^{]*\{[^}]*border(?:-bottom)?(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
   ];
   for (const pattern of linkPatterns) {
@@ -370,17 +390,27 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ─── Priority 4: Header/nav background colors ───
+  // ─── P4: Meta theme-color / tile-color ───
+  const themeColorMatch = html.match(/<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i);
+  if (themeColorMatch?.[1]?.startsWith("#")) {
+    colorEntries.push({ hex: normalizeHex(themeColorMatch[1]), priority: 4, count: 4 });
+  }
+  const tileColorMatch = html.match(/<meta[^>]*name=["']msapplication-TileColor["'][^>]*content=["']([^"']+)["']/i);
+  if (tileColorMatch?.[1]?.startsWith("#")) {
+    colorEntries.push({ hex: normalizeHex(tileColorMatch[1]), priority: 4, count: 4 });
+  }
+
+  // ─── P5: Header/nav background colors ───
   const headerPatterns = [
     /(?:header|nav|navbar|top-bar|site-header)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
   ];
   for (const pattern of headerPatterns) {
     while ((match = pattern.exec(html)) !== null) {
-      colorEntries.push({ hex: normalizeHex(match[1]), priority: 4, count: 3 });
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 5, count: 3 });
     }
   }
 
-  // ─── Priority 5: All hex colors by frequency (lowest priority) ───
+  // ─── P6: All hex colors by frequency (weakest signal) ───
   const allHexRegex = /#[0-9a-fA-F]{3,8}\b/g;
   const hexFrequency = new Map<string, number>();
   while ((match = allHexRegex.exec(html)) !== null) {
@@ -388,14 +418,14 @@ export async function GET(request: NextRequest) {
     hexFrequency.set(hex, (hexFrequency.get(hex) || 0) + 1);
   }
   for (const [hex, count] of hexFrequency) {
-    colorEntries.push({ hex, priority: 5, count });
+    colorEntries.push({ hex, priority: 6, count });
   }
 
   // rgb() values
   const rgbRegex = /rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g;
   while ((match = rgbRegex.exec(html)) !== null) {
     const hex = rgbToHex(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
-    colorEntries.push({ hex: hex.toLowerCase(), priority: 5, count: 1 });
+    colorEntries.push({ hex: hex.toLowerCase(), priority: 6, count: 1 });
   }
 
   // ─── Filter out non-brand colors ───
