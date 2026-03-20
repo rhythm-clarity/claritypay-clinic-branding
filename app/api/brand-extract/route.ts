@@ -86,7 +86,8 @@ function normalizeHex(hex: string): string {
   return hex;
 }
 
-// Extract ALL logo images from header area of the HTML
+// Extract the navbar logo (logomark + wordmark combo) from the website
+// The navbar logo is almost always: an <img> inside an <a href="/"> in <header> or <nav>
 function extractLogoUrls(html: string, baseUrl: string): string[] {
   const logos: string[] = [];
   const seen = new Set<string>();
@@ -94,6 +95,7 @@ function extractLogoUrls(html: string, baseUrl: string): string[] {
   function addLogo(src: string) {
     try {
       const resolved = new URL(src, baseUrl).href;
+      if (/pixel|tracking|analytics|1x1|spacer/i.test(resolved)) return;
       if (!seen.has(resolved)) {
         seen.add(resolved);
         logos.push(resolved);
@@ -106,41 +108,94 @@ function extractLogoUrls(html: string, baseUrl: string): string[] {
     }
   }
 
-  // Look for logo in <header>, <nav>, or top-level areas
+  // Helper: given an <img> tag string, extract the highest-res src
+  // Checks srcset for 2x/3x versions, falls back to src
+  function extractBestSrc(imgTag: string): string | null {
+    // Try srcset first for highest resolution
+    const srcsetMatch = imgTag.match(/srcset=["']([^"']+)["']/i);
+    if (srcsetMatch) {
+      const entries = srcsetMatch[1].split(",").map((s) => s.trim());
+      let bestUrl = "";
+      let bestDensity = 0;
+      for (const entry of entries) {
+        const parts = entry.split(/\s+/);
+        const entryUrl = parts[0];
+        const descriptor = parts[1] || "1x";
+        let density = 1;
+        if (descriptor.endsWith("x")) density = parseFloat(descriptor) || 1;
+        else if (descriptor.endsWith("w")) density = parseInt(descriptor) || 1;
+        if (density > bestDensity) {
+          bestDensity = density;
+          bestUrl = entryUrl;
+        }
+      }
+      if (bestUrl) return bestUrl;
+    }
+    // Fall back to src
+    const srcMatch = imgTag.match(/src=["']([^"']+)["']/i);
+    return srcMatch?.[1] || null;
+  }
+
+  // Extract header and nav sections
   const headerMatch = html.match(/<header[^>]*>([\s\S]*?)<\/header>/i);
   const navMatch = html.match(/<nav[^>]*>([\s\S]*?)<\/nav>/i);
-  const searchArea = (headerMatch?.[1] || "") + (navMatch?.[1] || "");
-  const area = searchArea || html.slice(0, 80000);
+  const navbarHtml = (headerMatch?.[1] || "") + (navMatch?.[1] || "");
+  const hasNavbar = navbarHtml.length > 0;
+  const searchArea = hasNavbar ? navbarHtml : html.slice(0, 60000);
 
-  // 1. img tags with "logo" in class, id, alt, or src
+  // ─── PRIORITY 1: <img> inside <a href="/"> in navbar ───
+  // This is the #1 pattern: a link to homepage wrapping the logo img (logomark + wordmark)
+  const homeLinkPatterns = [
+    /<a[^>]*href=["']\/["'][^>]*>[\s\S]*?(<img[^>]*>)/gi,
+    new RegExp(`<a[^>]*href=["'](?:https?://)?(?:www\\.)?${baseUrl.replace(/https?:\/\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&").split("/")[0]}/?["'][^>]*>[\\s\\S]*?(<img[^>]*>)`, "gi"),
+  ];
+  for (const pattern of homeLinkPatterns) {
+    let m;
+    while ((m = pattern.exec(searchArea)) !== null) {
+      const best = extractBestSrc(m[1] || m[0]);
+      if (best) addLogo(best);
+    }
+  }
+
+  // ─── PRIORITY 2: <img> with "logo" in class, id, alt, or src ───
   const logoImgPatterns = [
-    /<img[^>]*(?:class|id|alt|src)=["'][^"']*logo[^"']*["'][^>]*src=["']([^"']+)["']/gi,
-    /<img[^>]*src=["']([^"']+)["'][^>]*(?:class|id|alt)=["'][^"']*logo[^"']*["']/gi,
+    /(<img[^>]*(?:class|id)=["'][^"']*logo[^"']*["'][^>]*>)/gi,
+    /(<img[^>]*alt=["'][^"']*logo[^"']*["'][^>]*>)/gi,
+    /(<img[^>]*src=["'][^"']*logo[^"']+["'][^>]*>)/gi,
   ];
   for (const pattern of logoImgPatterns) {
     let m;
-    while ((m = pattern.exec(area)) !== null) {
-      if (m[1]) addLogo(m[1]);
+    while ((m = pattern.exec(searchArea)) !== null) {
+      const best = extractBestSrc(m[1]);
+      if (best) addLogo(best);
     }
   }
 
-  // 2. All images in header/nav area (often the logo is the first img)
-  if (searchArea) {
-    const allImgs = searchArea.matchAll(/<img[^>]*src=["']([^"']+)["']/gi);
-    for (const m of allImgs) {
-      if (m[1] && !m[1].includes("icon") && !m[1].includes("avatar") && !m[1].includes("pixel") && !m[1].includes("tracking")) {
-        addLogo(m[1]);
-      }
+  // ─── PRIORITY 3: <img> inside elements with "logo" or "brand" class ───
+  const logoContainerPatterns = [
+    /<[a-z]+[^>]*class=["'][^"']*(?:logo|brand|site-logo|navbar-brand)[^"']*["'][^>]*>[\s\S]*?(<img[^>]*>)/gi,
+    /<[a-z]+[^>]*id=["'][^"']*(?:logo|brand)[^"']*["'][^>]*>[\s\S]*?(<img[^>]*>)/gi,
+  ];
+  for (const pattern of logoContainerPatterns) {
+    let m;
+    while ((m = pattern.exec(searchArea)) !== null) {
+      const best = extractBestSrc(m[1]);
+      if (best) addLogo(best);
     }
   }
 
-  // 3. og:image as another option
+  // ─── PRIORITY 4: First <img> in navbar (fallback) ───
+  if (hasNavbar && logos.length === 0) {
+    const firstImg = /(<img[^>]*>)/i.exec(navbarHtml);
+    if (firstImg) {
+      const best = extractBestSrc(firstImg[1]);
+      if (best) addLogo(best);
+    }
+  }
+
+  // ─── PRIORITY 5: og:image (often the full brand logo for social sharing) ───
   const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
   if (ogMatch?.[1]) addLogo(ogMatch[1]);
-
-  // 4. apple-touch-icon (often a clean logomark)
-  const touchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
-  if (touchMatch?.[1]) addLogo(touchMatch[1]);
 
   return logos;
 }

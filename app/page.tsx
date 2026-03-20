@@ -75,6 +75,10 @@ function processLogoOnCanvas(
       canvas.height = ch;
       const ctx = canvas.getContext("2d")!;
 
+      // Use high-quality image smoothing to avoid pixelation when upscaling
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+
       // White bg with rounded corners
       ctx.fillStyle = "#FFFFFF";
       ctx.beginPath();
@@ -443,17 +447,16 @@ export default function BrandKitPage() {
         if (clearbitRes.ok) logoCandidates.push({ src: clearbitUrl, label: "Logomark (Clearbit)" });
       } catch { /* skip */ }
 
-      // 2. Server-extracted from website header (full wordmark + logo usually)
+      // 2. Server-extracted from website navbar (full logomark + wordmark)
       for (let i = 0; i < Math.min(serverLogoUrls.length, 4); i++) {
         const u = serverLogoUrls[i];
-        // Try to label intelligently
-        const isIcon = /icon|favicon|apple-touch/i.test(u);
         const isSvg = /\.svg/i.test(u);
-        const label = isIcon
-          ? "Icon"
+        const isOg = /og[_-]?image|share|social/i.test(u);
+        const label = isOg
+          ? "Social Share Image"
           : i === 0
-            ? `Full Logo (Website Header)${isSvg ? " — SVG" : ""}`
-            : `Logo Option ${i + 1}${isSvg ? " — SVG" : ""}`;
+            ? `Navbar Logo${isSvg ? " (SVG)" : ""}`
+            : `Logo Option ${i + 1}${isSvg ? " (SVG)" : ""}`;
         logoCandidates.push({ src: u, label });
       }
 
