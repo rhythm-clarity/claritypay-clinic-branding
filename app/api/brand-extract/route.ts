@@ -86,50 +86,63 @@ function normalizeHex(hex: string): string {
   return hex;
 }
 
-// Extract logo URL from header area of the HTML
-function extractLogoUrl(html: string, baseUrl: string): string | null {
+// Extract ALL logo images from header area of the HTML
+function extractLogoUrls(html: string, baseUrl: string): string[] {
+  const logos: string[] = [];
+  const seen = new Set<string>();
+
+  function addLogo(src: string) {
+    try {
+      const resolved = new URL(src, baseUrl).href;
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        logos.push(resolved);
+      }
+    } catch {
+      if (!seen.has(src)) {
+        seen.add(src);
+        logos.push(src);
+      }
+    }
+  }
+
   // Look for logo in <header>, <nav>, or top-level areas
   const headerMatch = html.match(/<header[^>]*>([\s\S]*?)<\/header>/i);
   const navMatch = html.match(/<nav[^>]*>([\s\S]*?)<\/nav>/i);
   const searchArea = (headerMatch?.[1] || "") + (navMatch?.[1] || "");
+  const area = searchArea || html.slice(0, 80000);
 
-  // First: look for img with "logo" in class, id, alt, or src within header/nav
+  // 1. img tags with "logo" in class, id, alt, or src
   const logoImgPatterns = [
-    // img tags with logo in attributes (within header)
     /<img[^>]*(?:class|id|alt|src)=["'][^"']*logo[^"']*["'][^>]*src=["']([^"']+)["']/gi,
     /<img[^>]*src=["']([^"']+)["'][^>]*(?:class|id|alt)=["'][^"']*logo[^"']*["']/gi,
-    // SVG with logo in class/id
-    /<(?:img|svg)[^>]*(?:class|id)=["'][^"']*logo[^"']*["'][^>]*>/gi,
   ];
-
   for (const pattern of logoImgPatterns) {
-    const m = pattern.exec(searchArea || html.slice(0, 50000));
-    if (m?.[1]) {
-      try {
-        return new URL(m[1], baseUrl).href;
-      } catch {
-        return m[1];
-      }
+    let m;
+    while ((m = pattern.exec(area)) !== null) {
+      if (m[1]) addLogo(m[1]);
     }
   }
 
-  // Fallback: any img in header/nav area
+  // 2. All images in header/nav area (often the logo is the first img)
   if (searchArea) {
-    const imgMatch = /<img[^>]*src=["']([^"']+)["']/i.exec(searchArea);
-    if (imgMatch?.[1]) {
-      try {
-        return new URL(imgMatch[1], baseUrl).href;
-      } catch {
-        return imgMatch[1];
+    const allImgs = searchArea.matchAll(/<img[^>]*src=["']([^"']+)["']/gi);
+    for (const m of allImgs) {
+      if (m[1] && !m[1].includes("icon") && !m[1].includes("avatar") && !m[1].includes("pixel") && !m[1].includes("tracking")) {
+        addLogo(m[1]);
       }
     }
   }
 
-  // Last resort: look for og:image meta
+  // 3. og:image as another option
   const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-  if (ogMatch?.[1]) return ogMatch[1];
+  if (ogMatch?.[1]) addLogo(ogMatch[1]);
 
-  return null;
+  // 4. apple-touch-icon (often a clean logomark)
+  const touchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
+  if (touchMatch?.[1]) addLogo(touchMatch[1]);
+
+  return logos;
 }
 
 export async function GET(request: NextRequest) {
@@ -262,8 +275,8 @@ export async function GET(request: NextRequest) {
   deduped.sort((a, b) => a.priority - b.priority || b.count - a.count);
   const topColors = deduped.slice(0, 2).map((e) => e.hex);
 
-  // Extract logo URL from header
-  const logoUrl = extractLogoUrl(html, normalized);
+  // Extract logo URLs from header (multiple: logomark, wordmark, etc.)
+  const logoUrls = extractLogoUrls(html, normalized);
 
-  return NextResponse.json({ colors: topColors, domain, logoUrl });
+  return NextResponse.json({ colors: topColors, domain, logoUrls });
 }
