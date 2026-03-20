@@ -394,8 +394,7 @@ function BillingPortalPreview({
 export default function BrandKitPage() {
   const [url, setUrl] = useState("");
   const [state, setState] = useState<AppState>("idle");
-  const [logoOptions, setLogoOptions] = useState<{ src: string; blobUrl: string | null; label: string; wasUpscaled: boolean; originalWidth: number; finalWidth: number }[]>([]);
-  const [selectedLogoIndex, setSelectedLogoIndex] = useState(0);
+  const [logo, setLogo] = useState<{ blobUrl: string; wasUpscaled: boolean; originalWidth: number; finalWidth: number } | null>(null);
   const [colors, setColors] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -403,14 +402,9 @@ export default function BrandKitPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Current selected logo
-  const selectedLogo = logoOptions[selectedLogoIndex] || null;
-
   useEffect(() => {
-    return () => {
-      logoOptions.forEach((opt) => { if (opt.blobUrl) URL.revokeObjectURL(opt.blobUrl); });
-    };
-  }, [logoOptions]);
+    return () => { if (logo?.blobUrl) URL.revokeObjectURL(logo.blobUrl); };
+  }, [logo]);
 
   const handleExtract = useCallback(async () => {
     const d = extractDomain(url);
@@ -424,63 +418,44 @@ export default function BrandKitPage() {
     setError(null);
     setColors([]);
     setSelectedColor(null);
-    logoOptions.forEach((opt) => { if (opt.blobUrl) URL.revokeObjectURL(opt.blobUrl); });
-    setLogoOptions([]);
-    setSelectedLogoIndex(0);
+    if (logo?.blobUrl) URL.revokeObjectURL(logo.blobUrl);
+    setLogo(null);
 
     try {
-      // Fetch colors + server-extracted logo URLs from our API
+      // Fetch colors + server-extracted logo URL from our API
       const apiRes = await fetch(`/api/brand-extract?url=${encodeURIComponent(fullUrl(url))}`);
       const apiData = await apiRes.json();
       if (!apiRes.ok) throw new Error(apiData.error || "Extraction failed");
 
       const serverColors: string[] = apiData.colors || [];
-      const serverLogoUrls: string[] = apiData.logoUrls || [];
+      const serverLogoUrl: string | null = apiData.logoUrl || null;
 
-      // Collect all logo candidates
-      const logoCandidates: { src: string; label: string }[] = [];
-
-      // 1. Clearbit (clean logomark, usually just the icon)
-      try {
-        const clearbitUrl = `https://logo.clearbit.com/${d}?size=800&format=png`;
-        const clearbitRes = await fetch(clearbitUrl);
-        if (clearbitRes.ok) logoCandidates.push({ src: clearbitUrl, label: "Logomark (Clearbit)" });
-      } catch { /* skip */ }
-
-      // 2. Server-extracted from website navbar (full logomark + wordmark)
-      for (let i = 0; i < Math.min(serverLogoUrls.length, 4); i++) {
-        const u = serverLogoUrls[i];
-        const isSvg = /\.svg/i.test(u);
-        const isOg = /og[_-]?image|share|social/i.test(u);
-        const label = isOg
-          ? "Social Share Image"
-          : i === 0
-            ? `Navbar Logo${isSvg ? " (SVG)" : ""}`
-            : `Logo Option ${i + 1}${isSvg ? " (SVG)" : ""}`;
-        logoCandidates.push({ src: u, label });
+      // Try server-extracted navbar logo first, then Clearbit as fallback
+      let logoSrc: string | null = serverLogoUrl;
+      if (!logoSrc) {
+        try {
+          const clearbitUrl = `https://logo.clearbit.com/${d}?size=800&format=png`;
+          const clearbitRes = await fetch(clearbitUrl);
+          if (clearbitRes.ok) logoSrc = clearbitUrl;
+        } catch { /* skip */ }
       }
 
-      // No favicon fallback — only real logos from header/footer/Clearbit
+      // Process logo on canvas (white bg, 4px padding, 4px rounded, upscale to 200px min)
+      let processedLogo: { blobUrl: string; logoColors: string[]; wasUpscaled: boolean; originalWidth: number; finalWidth: number } | null = null;
+      if (logoSrc) {
+        try {
+          processedLogo = await processLogoOnCanvas(logoSrc);
+        } catch { /* skip */ }
+      }
 
-      // Process each logo on canvas (white bg, padded, rounded, upscale to 200px min)
-      const processedLogos = await Promise.all(
-        logoCandidates.map(async (candidate) => {
-          try {
-            const processed = await processLogoOnCanvas(candidate.src);
-            return { src: candidate.src, blobUrl: processed.blobUrl, label: candidate.label, logoColors: processed.logoColors, wasUpscaled: processed.wasUpscaled, originalWidth: processed.originalWidth, finalWidth: processed.finalWidth };
-          } catch {
-            return { src: candidate.src, blobUrl: null, label: candidate.label, logoColors: [] as string[], wasUpscaled: false, originalWidth: 0, finalWidth: 0 };
-          }
-        })
-      );
-
-      setLogoOptions(processedLogos.map((p) => ({ src: p.src, blobUrl: p.blobUrl, label: p.label, wasUpscaled: p.wasUpscaled, originalWidth: p.originalWidth, finalWidth: p.finalWidth })));
-      setSelectedLogoIndex(0);
+      if (processedLogo) {
+        setLogo({ blobUrl: processedLogo.blobUrl, wasUpscaled: processedLogo.wasUpscaled, originalWidth: processedLogo.originalWidth, finalWidth: processedLogo.finalWidth });
+      }
 
       // Merge colors: server colors first, then logo-extracted colors
       const merged: string[] = [...serverColors];
-      for (const pl of processedLogos) {
-        for (const lc of pl.logoColors) {
+      if (processedLogo) {
+        for (const lc of processedLogo.logoColors) {
           if (merged.length < 2 && !merged.some((m) => m.toLowerCase() === lc.toLowerCase())) {
             merged.push(lc);
           }
@@ -490,7 +465,7 @@ export default function BrandKitPage() {
       setColors(finalColors);
       if (finalColors.length > 0) setSelectedColor(finalColors[0]);
 
-      if (processedLogos.length === 0 && finalColors.length === 0) {
+      if (!processedLogo && finalColors.length === 0) {
         setError("Could not extract logo or brand colors from this website");
         setState("error");
       } else {
@@ -500,37 +475,19 @@ export default function BrandKitPage() {
       setError("Something went wrong. Please try again.");
       setState("error");
     }
-  }, [url, logoOptions]);
+  }, [url, logo]);
 
-  const downloadLogo = useCallback(async () => {
-    if (!selectedLogo) return;
-    const href = selectedLogo.blobUrl || selectedLogo.src;
-
-    if (selectedLogo.blobUrl) {
-      const a = document.createElement("a");
-      a.href = selectedLogo.blobUrl;
-      a.download = `${domain || "clinic"}-logo.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      return;
-    }
-
-    try {
-      const res = await fetch(href);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `${domain || "clinic"}-logo.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(href, "_blank");
-    }
-  }, [selectedLogo, domain]);
+  const downloadLogo = useCallback(() => {
+    if (!logo?.blobUrl) return;
+    const clinicName = prettyName(domain).toLowerCase().replace(/\s+/g, "-");
+    const filename = `${clinicName}-claritypay-logo.png`;
+    const a = document.createElement("a");
+    a.href = logo.blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [logo, domain]);
 
   const copyHex = useCallback((hex: string) => {
     navigator.clipboard.writeText(hex);
@@ -722,10 +679,9 @@ export default function BrandKitPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 {/* Logo */}
                 <div className="ds-card" style={{ padding: 28 }}>
-                  <div className="type-overline" style={{ marginBottom: 16 }}>Logo — Select Version</div>
+                  <div className="type-overline" style={{ marginBottom: 16 }}>Clinic Logo</div>
 
-                  {/* Selected logo preview */}
-                  {selectedLogo && (
+                  {logo ? (
                     <>
                       <div
                         style={{
@@ -742,12 +698,11 @@ export default function BrandKitPage() {
                         }}
                       >
                         <img
-                          src={selectedLogo.blobUrl || selectedLogo.src}
+                          src={logo.blobUrl}
                           alt={`${domain} logo`}
                           style={{ maxHeight: 80, maxWidth: "100%", objectFit: "contain" }}
                         />
-                        {/* Upscaled badge */}
-                        {selectedLogo.wasUpscaled && (
+                        {logo.wasUpscaled && (
                           <div
                             style={{
                               position: "absolute",
@@ -765,88 +720,34 @@ export default function BrandKitPage() {
                             }}
                           >
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-                            Upscaled {selectedLogo.originalWidth}px → {selectedLogo.finalWidth}px
+                            Upscaled {logo.originalWidth}px → {logo.finalWidth}px
                           </div>
                         )}
                       </div>
 
-                      <div style={{ fontSize: 11, color: "var(--content-tertiary)", textAlign: "center", marginBottom: 12 }}>
-                        {selectedLogo.label}
+                      <div style={{ fontSize: 13, color: "var(--content-secondary)", textAlign: "center", marginBottom: 14, fontFamily: "var(--font-mono)" }}>
+                        {domain}
                       </div>
+                      <button
+                        onClick={downloadLogo}
+                        className="ds-btn-secondary"
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          padding: "10px 0",
+                        }}
+                      >
+                        <Download size={14} /> Download PNG
+                      </button>
                     </>
-                  )}
-
-                  {/* Logo options thumbnails */}
-                  {logoOptions.length > 1 && (
-                    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                      {logoOptions.map((opt, i) => (
-                        <div
-                          key={i}
-                          onClick={() => setSelectedLogoIndex(i)}
-                          style={{
-                            flex: "1 0 0",
-                            minWidth: 70,
-                            padding: 10,
-                            background: "#FFFFFF",
-                            borderRadius: 10,
-                            border: selectedLogoIndex === i ? "2px solid var(--action-default)" : "2px solid var(--border-subtle)",
-                            cursor: "pointer",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            gap: 6,
-                            transition: "border-color 0.15s",
-                            position: "relative",
-                          }}
-                        >
-                          <img
-                            src={opt.blobUrl || opt.src}
-                            alt={opt.label}
-                            style={{ height: 32, maxWidth: "100%", objectFit: "contain" }}
-                          />
-                          <div style={{ fontSize: 9, color: "var(--content-tertiary)", textAlign: "center", lineHeight: 1.2 }}>
-                            {opt.label.length > 20 ? opt.label.slice(0, 18) + "..." : opt.label}
-                          </div>
-                          {selectedLogoIndex === i && (
-                            <div
-                              style={{
-                                position: "absolute",
-                                top: -6,
-                                right: -6,
-                                width: 16,
-                                height: 16,
-                                borderRadius: "50%",
-                                background: "var(--action-default)",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                            >
-                              <Check size={10} color="#fff" strokeWidth={3} />
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--content-tertiary)", textAlign: "center", padding: "20px 0" }}>
+                      No logo found in website header
                     </div>
                   )}
-
-                  <div style={{ fontSize: 13, color: "var(--content-secondary)", textAlign: "center", marginBottom: 14, fontFamily: "var(--font-mono)" }}>
-                    {domain}
-                  </div>
-                  <button
-                    onClick={downloadLogo}
-                    className="ds-btn-secondary"
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      padding: "10px 0",
-                    }}
-                  >
-                    <Download size={14} /> Download PNG
-                  </button>
                 </div>
 
                 {/* Colors */}
@@ -963,7 +864,7 @@ export default function BrandKitPage() {
                     <BillingPortalPreview
                       key={color}
                       brandColor={color}
-                      logoUrl={selectedLogo?.blobUrl || selectedLogo?.src || null}
+                      logoUrl={logo?.blobUrl || null}
                       clinicName={prettyName(domain)}
                       label={`Option ${i + 1} — ${color.toUpperCase()}`}
                       isSelected={selectedColor === color}
