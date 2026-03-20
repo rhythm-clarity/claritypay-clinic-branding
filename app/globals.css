@@ -1,0 +1,192 @@
+/* ─── FONTS ──────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'GT Walsheim';
+  src: url('/fonts/GT-Walsheim-Regular.woff2') format('woff2'),
+       url('/fonts/GT-Walsheim-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'GT Walsheim';
+  src: url('/fonts/GT-Walsheim-Medium.woff2') format('woff2'),
+       url('/fonts/GT-Walsheim-Medium.woff') format('woff');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'GT Walsheim';
+  src: url('/fonts/GT-Walsheim-Bold.woff2') format('woff2'),
+       url('/fonts/GT-Walsheim-Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import "tailwindcss";
+
+/* ─── DESIGN TOKENS ──────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --font-display: 'GT Walsheim', system-ui, sans-serif;
+    --font-body:    'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+    --brand-blue:      #1884F9;
+    --brand-red:       #FF2D00;
+    --brand-deep-blue: #1F2A37;
+
+    --gray-1:  #F9F9F9;
+    --gray-2:  #F3F3F3;
+    --gray-3:  #E2E2E2;
+
+    --blue-1:    #EFF6FF;
+    --blue-base: #1884F9;
+
+    --surface-page:     #FFFFFF;
+    --surface-default:  #FFFFFF;
+    --surface-subtle:   #F9FAFB;
+    --surface-muted:    #F3F3F3;
+    --surface-content:  #FAFAFA;
+
+    --content-primary:   #000000;
+    --content-secondary: #5F5F5F;
+    --content-tertiary:  #9D9D9D;
+    --content-inverted:  #FFFFFF;
+    --content-link:      #1884F9;
+    --content-on-action: #FFFFFF;
+
+    --action-default:  #1884F9;
+    --action-hover:    #1434CB;
+    --action-active:   #0C427D;
+
+    --border-default: #E5E7EB;
+    --border-subtle:  #F3F3F3;
+    --border-strong:  #D1D5DB;
+    --border-focus:   #1884F9;
+
+    --space-1:  4px;
+    --space-2:  8px;
+    --space-3:  12px;
+    --space-4:  16px;
+    --space-5:  20px;
+    --space-6:  24px;
+    --space-8:  32px;
+
+    --radius-sm:   4px;
+    --radius-md:   8px;
+    --radius-lg:   12px;
+    --radius-xl:   16px;
+    --radius-full: 9999px;
+
+    --elevation-1: 0 1px 2px rgba(10,10,10,0.05), 0 1px 4px rgba(10,10,10,0.10);
+    --elevation-2: 0 2px 5px rgba(10,10,10,0.05), 0 4px 10px rgba(10,10,10,0.10);
+    --elevation-3: 0 4px 12px rgba(10,10,10,0.08), 0 8px 24px rgba(10,10,10,0.12);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--content-primary);
+    background: var(--surface-content);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--content-primary);
+    letter-spacing: -0.01em;
+  }
+
+  a { color: var(--content-link); text-decoration: none; }
+  img, svg { display: block; max-width: 100%; }
+  button { font-family: var(--font-body); cursor: pointer; border: none; background: none; }
+  input, textarea, select { font-family: var(--font-body); }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-full); }
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+.type-display-xl { font-family: var(--font-display); font-size: 48px; font-weight: 700; letter-spacing: -0.03em; }
+.type-display-l  { font-family: var(--font-display); font-size: 36px; font-weight: 700; letter-spacing: -0.02em; }
+.type-display-m  { font-family: var(--font-display); font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.type-h1  { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.type-h2  { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.type-body-m { font-family: var(--font-body); font-size: 14px; font-weight: 400; }
+.type-body-s { font-family: var(--font-body); font-size: 13px; font-weight: 400; }
+.type-label  { font-family: var(--font-body); font-size: 12px; font-weight: 600; }
+.type-overline { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--content-tertiary); }
+
+/* ── DS Components ────────────────────────────────────────────────────────── */
+.ds-card {
+  background: var(--surface-default);
+  border: none;
+  border-radius: 16px;
+  box-shadow: var(--elevation-1);
+  overflow: hidden;
+}
+
+.ds-btn-blue {
+  background: var(--action-default);
+  color: var(--content-on-action);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  transition: background 0.15s;
+  cursor: pointer;
+  border: none;
+}
+.ds-btn-blue:hover { background: var(--action-hover); }
+
+.ds-btn-secondary {
+  background: var(--surface-default);
+  color: var(--content-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.ds-btn-secondary:hover { background: var(--surface-subtle); border-color: var(--border-strong); }
+
+.ds-input {
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: var(--surface-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 6px var(--space-3);
+  color: var(--content-primary);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+  width: 100%;
+}
+.ds-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(24,132,249,0.15);
+}
+
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.animate-spin { animation: spin 1s linear infinite; }
