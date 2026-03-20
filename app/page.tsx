@@ -431,7 +431,10 @@ export default function BrandKitPage() {
       const serverLogoUrl: string | null = apiData.logoUrl || null;
 
       // Try server-extracted navbar logo first, then Clearbit as fallback
-      let logoSrc: string | null = serverLogoUrl;
+      // Proxy through our API to avoid CORS issues with cross-origin canvas
+      let logoSrc: string | null = serverLogoUrl
+        ? `/api/logo-proxy?url=${encodeURIComponent(serverLogoUrl)}`
+        : null;
       if (!logoSrc) {
         try {
           const clearbitUrl = `https://logo.clearbit.com/${d}?size=800&format=png`;
