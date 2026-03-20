@@ -292,12 +292,28 @@ export async function GET(request: NextRequest) {
     colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
   }
 
-  // ─── Priority 2.5: Inline color on clickable elements / links / text links ───
-  // When no buttons exist, links and clickable text reveal the brand color
+  // ─── Priority 1.5: Inline color on <a> tags (repeated = strong brand signal) ───
+  // When many links share the same inline color, it's THE brand color
+  const inlineLinkColorRegex = /<a[^>]*style=["'][^"']*?(?:^|;|"')\s*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
+  const inlineLinkColorCounts = new Map<string, number>();
+  while ((match = inlineLinkColorRegex.exec(html)) !== null) {
+    const hex = normalizeHex(match[1]);
+    inlineLinkColorCounts.set(hex, (inlineLinkColorCounts.get(hex) || 0) + 1);
+  }
+  for (const [hex, count] of inlineLinkColorCounts) {
+    // If a color appears on 3+ inline-styled links, it's a very strong brand signal
+    const priority = count >= 3 ? 1 : 2;
+    colorEntries.push({ hex, priority, count: count * 5 });
+  }
+
+  // Also check global CSS: a { color: #xxx } — this is a site-wide brand decision
+  const globalLinkColor = /\ba\s*\{[^}]*?color\s*:\s*(#[0-9a-fA-F]{3,8})/i.exec(html);
+  if (globalLinkColor) {
+    colorEntries.push({ hex: normalizeHex(globalLinkColor[1]), priority: 1, count: 20 });
+  }
+
+  // Inline style color on elements with cursor:pointer or onclick
   const clickableColorPatterns = [
-    // Inline style color on <a> tags (text link color = brand color)
-    /<a[^>]*style=["'][^"']*(?:^|;)\s*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    // Inline style color on elements with cursor:pointer or onclick
     /<[a-z]+[^>]*(?:onclick|cursor\s*:\s*pointer)[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
     /<[a-z]+[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})[^"']*(?:cursor\s*:\s*pointer)/gi,
   ];
@@ -309,8 +325,6 @@ export async function GET(request: NextRequest) {
 
   // ─── Priority 3: Link/anchor CSS colors (often brand primary) ───
   const linkPatterns = [
-    // a { color: } or a, ... { color: }
-    /\ba\s*[{,][^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
     // Named link classes
     /\.(?:link|nav-link|menu-link|text-link|read-more|learn-more|view-more)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
     // a:hover colors (hover state often reveals brand color)
