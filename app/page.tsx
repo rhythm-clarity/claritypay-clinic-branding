@@ -460,10 +460,7 @@ export default function BrandKitPage() {
         logoCandidates.push({ src: u, label });
       }
 
-      // 3. Google Favicon fallback
-      if (logoCandidates.length === 0) {
-        logoCandidates.push({ src: `https://www.google.com/s2/favicons?domain=${d}&sz=128`, label: "Favicon" });
-      }
+      // No favicon fallback — only real logos from header/footer/Clearbit
 
       // Process each logo on canvas (white bg, padded, rounded, upscale to 200px min)
       const processedLogos = await Promise.all(

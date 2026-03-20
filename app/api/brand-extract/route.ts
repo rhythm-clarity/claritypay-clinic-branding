@@ -193,10 +193,27 @@ function extractLogoUrls(html: string, baseUrl: string): string[] {
     }
   }
 
-  // ─── PRIORITY 5: og:image (often the full brand logo for social sharing) ───
+  // ─── PRIORITY 5: Footer logo ───
+  const footerMatch = html.match(/<footer[^>]*>([\s\S]*?)<\/footer>/i);
+  if (footerMatch?.[1]) {
+    const footerLogoPatterns = [
+      /(<img[^>]*(?:class|id|alt|src)=["'][^"']*logo[^"']*["'][^>]*>)/gi,
+      /(<img[^>]*src=["'][^"']*logo[^"']+["'][^>]*>)/gi,
+    ];
+    for (const pattern of footerLogoPatterns) {
+      let m;
+      while ((m = pattern.exec(footerMatch[1])) !== null) {
+        const best = extractBestSrc(m[1]);
+        if (best) addLogo(best);
+      }
+    }
+  }
+
+  // ─── PRIORITY 6: og:image (often the full brand logo for social) ───
   const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
   if (ogMatch?.[1]) addLogo(ogMatch[1]);
 
+  // Never use favicon — only use logos from header/footer/og:image
   return logos;
 }
 
