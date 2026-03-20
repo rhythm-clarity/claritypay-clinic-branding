@@ -292,14 +292,37 @@ export async function GET(request: NextRequest) {
     colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
   }
 
-  // ─── Priority 3: Link/anchor colors (often brand primary) ───
+  // ─── Priority 2.5: Inline color on clickable elements / links / text links ───
+  // When no buttons exist, links and clickable text reveal the brand color
+  const clickableColorPatterns = [
+    // Inline style color on <a> tags (text link color = brand color)
+    /<a[^>]*style=["'][^"']*(?:^|;)\s*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // Inline style color on elements with cursor:pointer or onclick
+    /<[a-z]+[^>]*(?:onclick|cursor\s*:\s*pointer)[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    /<[a-z]+[^>]*style=["'][^"']*color\s*:\s*(#[0-9a-fA-F]{3,8})[^"']*(?:cursor\s*:\s*pointer)/gi,
+  ];
+  for (const pattern of clickableColorPatterns) {
+    while ((match = pattern.exec(html)) !== null) {
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 6 });
+    }
+  }
+
+  // ─── Priority 3: Link/anchor CSS colors (often brand primary) ───
   const linkPatterns = [
+    // a { color: } or a, ... { color: }
     /\ba\s*[{,][^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
-    /\.(?:link|nav-link|menu-link)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // Named link classes
+    /\.(?:link|nav-link|menu-link|text-link|read-more|learn-more|view-more)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // a:hover colors (hover state often reveals brand color)
+    /\ba:hover\s*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // Heading links, nav items
+    /\.(?:nav-item|menu-item|nav-active|active)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // border-bottom/underline on links (sometimes used as brand accent)
+    /\ba[^{]*\{[^}]*border(?:-bottom)?(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
   ];
   for (const pattern of linkPatterns) {
     while ((match = pattern.exec(html)) !== null) {
-      colorEntries.push({ hex: normalizeHex(match[1]), priority: 3, count: 4 });
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 3, count: 5 });
     }
   }
 
