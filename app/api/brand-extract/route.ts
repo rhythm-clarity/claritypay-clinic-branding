@@ -287,8 +287,12 @@ export async function GET(request: NextRequest) {
   }
 
   // ─── Priority 2: CSS custom properties with brand/primary/accent names ───
+  // Exclude WordPress preset variables (--wp--preset--*) — those are theme defaults, not clinic brand choices
   const brandVarRegex = /--(?:brand|primary|secondary|accent|main|theme|color-primary|color-accent|site)[a-z0-9-]*\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
+  const wpPresetVarRegex = /--wp--preset--/;
   while ((match = brandVarRegex.exec(html)) !== null) {
+    const fullMatch = html.slice(Math.max(0, match.index - 20), match.index + match[0].length);
+    if (wpPresetVarRegex.test(fullMatch)) continue; // skip WP theme presets
     colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
   }
 
