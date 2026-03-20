@@ -54,7 +54,7 @@ function processLogoOnCanvas(
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
-      const MIN_WIDTH = 60;
+      const MIN_WIDTH = 200; // HD: ensure at least 200px wide
       const padding = 4;
       const radius = 4;
 
@@ -420,34 +420,32 @@ export default function BrandKitPage() {
     setProcessedLogoBlobUrl(null);
 
     try {
-      const [logoResult, colorsResult] = await Promise.allSettled([
-        (async () => {
-          const clearbitUrl = `https://logo.clearbit.com/${d}?size=400`;
-          const res = await fetch(clearbitUrl);
-          if (!res.ok) throw new Error("Clearbit failed");
-          return clearbitUrl;
-        })(),
-        (async () => {
-          const res = await fetch(`/api/brand-extract?url=${encodeURIComponent(fullUrl(url))}`);
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Color extraction failed");
-          return data.colors as string[];
-        })(),
-      ]);
+      // Fetch colors + server-extracted logo URL from our API
+      const apiRes = await fetch(`/api/brand-extract?url=${encodeURIComponent(fullUrl(url))}`);
+      const apiData = await apiRes.json();
+      if (!apiRes.ok) throw new Error(apiData.error || "Extraction failed");
 
+      const serverColors: string[] = apiData.colors || [];
+      const serverLogoUrl: string | null = apiData.logoUrl || null;
+
+      // Try logo sources in priority order:
+      // 1. Clearbit (high-res, clean)
+      // 2. Server-extracted from website header
+      // 3. Google Favicon fallback
       let logoUrl: string | null = null;
-      let serverColors: string[] = [];
+      try {
+        const clearbitUrl = `https://logo.clearbit.com/${d}?size=800&format=png`;
+        const clearbitRes = await fetch(clearbitUrl);
+        if (clearbitRes.ok) logoUrl = clearbitUrl;
+      } catch { /* fallback below */ }
 
-      if (logoResult.status === "fulfilled") {
-        logoUrl = logoResult.value;
-      } else {
+      if (!logoUrl && serverLogoUrl) {
+        logoUrl = serverLogoUrl;
+      }
+      if (!logoUrl) {
         logoUrl = `https://www.google.com/s2/favicons?domain=${d}&sz=128`;
       }
       setLogoSrc(logoUrl);
-
-      if (colorsResult.status === "fulfilled") {
-        serverColors = colorsResult.value;
-      }
 
       let logoColors: string[] = [];
       try {
@@ -480,13 +478,37 @@ export default function BrandKitPage() {
     }
   }, [url, processedLogoBlobUrl]);
 
-  const downloadLogo = useCallback(() => {
+  const downloadLogo = useCallback(async () => {
     const href = processedLogoBlobUrl || logoSrc;
     if (!href) return;
-    const a = document.createElement("a");
-    a.href = href;
-    a.download = `${domain || "clinic"}-logo.png`;
-    a.click();
+
+    // If we have a blob URL, download directly
+    if (processedLogoBlobUrl) {
+      const a = document.createElement("a");
+      a.href = processedLogoBlobUrl;
+      a.download = `${domain || "clinic"}-logo.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // For remote URLs, fetch as blob first to force download
+    try {
+      const res = await fetch(href);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${domain || "clinic"}-logo.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Fallback: open in new tab
+      window.open(href, "_blank");
+    }
   }, [processedLogoBlobUrl, logoSrc, domain]);
 
   const copyHex = useCallback((hex: string) => {

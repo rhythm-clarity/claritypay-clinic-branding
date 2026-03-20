@@ -2,26 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 
 function normalizeUrl(input: string): string {
   let url = input.trim();
-  if (!/^https?:\/\//i.test(url)) {
-    url = "https://" + url;
-  }
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   return url;
 }
 
 function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
+  try { return new URL(url).hostname; }
+  catch { return ""; }
 }
 
 function hexToRgb(hex: string): [number, number, number] | null {
   hex = hex.replace("#", "");
-  if (hex.length === 3) {
-    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-  }
-  if (hex.length === 8) hex = hex.slice(0, 6); // strip alpha
+  if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  if (hex.length === 8) hex = hex.slice(0, 6);
   if (hex.length !== 6) return null;
   const n = parseInt(hex, 16);
   if (isNaN(n)) return null;
@@ -29,10 +22,7 @@ function hexToRgb(hex: string): [number, number, number] | null {
 }
 
 function rgbToHex(r: number, g: number, b: number): string {
-  return (
-    "#" +
-    [r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("")
-  );
+  return "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
 }
 
 function luminance(r: number, g: number, b: number): number {
@@ -55,21 +45,17 @@ function isGenericColor(hex: string): boolean {
 }
 
 function isNearGray(r: number, g: number, b: number): boolean {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  return max - min < 20;
+  return Math.max(r, g, b) - Math.min(r, g, b) < 20;
 }
 
 interface ColorEntry {
   hex: string;
-  priority: number; // lower = higher priority
+  priority: number;
   count: number;
 }
 
 function colorDistance(a: [number, number, number], b: [number, number, number]): number {
-  return Math.sqrt(
-    Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2)
-  );
+  return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
 }
 
 function deduplicateColors(entries: ColorEntry[]): ColorEntry[] {
@@ -94,6 +80,58 @@ function deduplicateColors(entries: ColorEntry[]): ColorEntry[] {
   return result;
 }
 
+function normalizeHex(hex: string): string {
+  hex = hex.toLowerCase();
+  if (hex.length === 4) hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+  return hex;
+}
+
+// Extract logo URL from header area of the HTML
+function extractLogoUrl(html: string, baseUrl: string): string | null {
+  // Look for logo in <header>, <nav>, or top-level areas
+  const headerMatch = html.match(/<header[^>]*>([\s\S]*?)<\/header>/i);
+  const navMatch = html.match(/<nav[^>]*>([\s\S]*?)<\/nav>/i);
+  const searchArea = (headerMatch?.[1] || "") + (navMatch?.[1] || "");
+
+  // First: look for img with "logo" in class, id, alt, or src within header/nav
+  const logoImgPatterns = [
+    // img tags with logo in attributes (within header)
+    /<img[^>]*(?:class|id|alt|src)=["'][^"']*logo[^"']*["'][^>]*src=["']([^"']+)["']/gi,
+    /<img[^>]*src=["']([^"']+)["'][^>]*(?:class|id|alt)=["'][^"']*logo[^"']*["']/gi,
+    // SVG with logo in class/id
+    /<(?:img|svg)[^>]*(?:class|id)=["'][^"']*logo[^"']*["'][^>]*>/gi,
+  ];
+
+  for (const pattern of logoImgPatterns) {
+    const m = pattern.exec(searchArea || html.slice(0, 50000));
+    if (m?.[1]) {
+      try {
+        return new URL(m[1], baseUrl).href;
+      } catch {
+        return m[1];
+      }
+    }
+  }
+
+  // Fallback: any img in header/nav area
+  if (searchArea) {
+    const imgMatch = /<img[^>]*src=["']([^"']+)["']/i.exec(searchArea);
+    if (imgMatch?.[1]) {
+      try {
+        return new URL(imgMatch[1], baseUrl).href;
+      } catch {
+        return imgMatch[1];
+      }
+    }
+  }
+
+  // Last resort: look for og:image meta
+  const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+  if (ogMatch?.[1]) return ogMatch[1];
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get("url");
   if (!url) {
@@ -113,8 +151,7 @@ export async function GET(request: NextRequest) {
     const res = await fetch(normalized, {
       signal: controller.signal,
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
       redirect: "follow",
@@ -123,14 +160,10 @@ export async function GET(request: NextRequest) {
 
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("text/html") && !contentType.includes("text/plain") && !contentType.includes("application/xhtml")) {
-      return NextResponse.json(
-        { colors: [], error: "URL did not return HTML content" },
-        { status: 400 }
-      );
+      return NextResponse.json({ colors: [], error: "URL did not return HTML content" }, { status: 400 });
     }
 
     html = await res.text();
-    // Limit to first 300KB to avoid memory issues
     if (html.length > 300_000) html = html.slice(0, 300_000);
   } catch (e: unknown) {
     const message = e instanceof Error && e.name === "AbortError"
@@ -140,92 +173,97 @@ export async function GET(request: NextRequest) {
   }
 
   const colorEntries: ColorEntry[] = [];
-
-  // Priority 1: Meta theme-color
-  const themeColorMatch = html.match(
-    /<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i
-  );
-  if (themeColorMatch) {
-    const hex = themeColorMatch[1].trim();
-    if (hex.startsWith("#")) {
-      colorEntries.push({ hex: hex.toLowerCase(), priority: 1, count: 10 });
-    }
-  }
-
-  // Priority 1: msapplication-TileColor
-  const tileColorMatch = html.match(
-    /<meta[^>]*name=["']msapplication-TileColor["'][^>]*content=["']([^"']+)["']/i
-  );
-  if (tileColorMatch) {
-    const hex = tileColorMatch[1].trim();
-    if (hex.startsWith("#")) {
-      colorEntries.push({ hex: hex.toLowerCase(), priority: 1, count: 10 });
-    }
-  }
-
-  // Priority 2: CSS custom properties with brand/primary/secondary/accent in name
-  const brandVarRegex =
-    /--(?:brand|primary|secondary|accent|main|theme)[a-z0-9-]*\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
   let match;
+
+  // ─── Priority 1: Button / CTA colors (strongest brand signal) ───
+  // Look for background-color on elements with button/btn/cta in class or tag
+  const buttonPatterns = [
+    // Inline styles on button-like elements
+    /(?:<button|<a[^>]*class=["'][^"']*(?:btn|button|cta|primary)[^"']*["'])[^>]*style=["'][^"']*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // CSS classes with btn/button/cta in name
+    /\.(?:btn|button|cta|primary-btn|submit|book|schedule|contact)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    // background-color properties near button/btn keywords
+    /(?:btn|button|cta|submit|primary)[a-z0-9_-]*[^{]{0,60}\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+  ];
+  for (const pattern of buttonPatterns) {
+    while ((match = pattern.exec(html)) !== null) {
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 1, count: 15 });
+    }
+  }
+
+  // ─── Priority 1: Meta theme-color (intentionally set brand color) ───
+  const themeColorMatch = html.match(/<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i);
+  if (themeColorMatch?.[1]?.startsWith("#")) {
+    colorEntries.push({ hex: normalizeHex(themeColorMatch[1]), priority: 1, count: 12 });
+  }
+  const tileColorMatch = html.match(/<meta[^>]*name=["']msapplication-TileColor["'][^>]*content=["']([^"']+)["']/i);
+  if (tileColorMatch?.[1]?.startsWith("#")) {
+    colorEntries.push({ hex: normalizeHex(tileColorMatch[1]), priority: 1, count: 12 });
+  }
+
+  // ─── Priority 2: CSS custom properties with brand/primary/accent names ───
+  const brandVarRegex = /--(?:brand|primary|secondary|accent|main|theme|color-primary|color-accent|site)[a-z0-9-]*\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
   while ((match = brandVarRegex.exec(html)) !== null) {
-    colorEntries.push({ hex: match[1].toLowerCase(), priority: 2, count: 5 });
+    colorEntries.push({ hex: normalizeHex(match[1]), priority: 2, count: 8 });
   }
 
-  // Priority 3: Button/CTA background colors
-  const buttonBgRegex =
-    /(?:btn|button|cta)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
-  while ((match = buttonBgRegex.exec(html)) !== null) {
-    colorEntries.push({ hex: match[1].toLowerCase(), priority: 3, count: 3 });
+  // ─── Priority 3: Link/anchor colors (often brand primary) ───
+  const linkPatterns = [
+    /\ba\s*[{,][^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+    /\.(?:link|nav-link|menu-link)[^{]*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+  ];
+  for (const pattern of linkPatterns) {
+    while ((match = pattern.exec(html)) !== null) {
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 3, count: 4 });
+    }
   }
 
-  // Priority 4: Link colors
-  const linkColorRegex = /\ba\s*\{[^}]*color\s*:\s*(#[0-9a-fA-F]{3,8})/gi;
-  while ((match = linkColorRegex.exec(html)) !== null) {
-    colorEntries.push({ hex: match[1].toLowerCase(), priority: 4, count: 2 });
+  // ─── Priority 4: Header/nav background colors ───
+  const headerPatterns = [
+    /(?:header|nav|navbar|top-bar|site-header)[^{]*\{[^}]*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8})/gi,
+  ];
+  for (const pattern of headerPatterns) {
+    while ((match = pattern.exec(html)) !== null) {
+      colorEntries.push({ hex: normalizeHex(match[1]), priority: 4, count: 3 });
+    }
   }
 
-  // Priority 5: All hex colors in the HTML (frequency-based)
+  // ─── Priority 5: All hex colors by frequency (lowest priority) ───
   const allHexRegex = /#[0-9a-fA-F]{3,8}\b/g;
   const hexFrequency = new Map<string, number>();
   while ((match = allHexRegex.exec(html)) !== null) {
-    let hex = match[0].toLowerCase();
-    // Normalize 3-char hex to 6-char
-    if (hex.length === 4) {
-      hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
-    }
+    const hex = normalizeHex(match[0]);
     hexFrequency.set(hex, (hexFrequency.get(hex) || 0) + 1);
   }
-
   for (const [hex, count] of hexFrequency) {
     colorEntries.push({ hex, priority: 5, count });
   }
 
-  // Priority 5: rgb() values
+  // rgb() values
   const rgbRegex = /rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g;
   while ((match = rgbRegex.exec(html)) !== null) {
     const hex = rgbToHex(parseInt(match[1]), parseInt(match[2]), parseInt(match[3]));
     colorEntries.push({ hex: hex.toLowerCase(), priority: 5, count: 1 });
   }
 
-  // Filter out non-brand colors
+  // ─── Filter out non-brand colors ───
   const filtered = colorEntries.filter((entry) => {
     const rgb = hexToRgb(entry.hex);
     if (!rgb) return false;
     const lum = luminance(...rgb);
-    if (lum > 0.85) return false; // near-white
-    if (lum < 0.05) return false; // near-black
+    if (lum > 0.85) return false;
+    if (lum < 0.05) return false;
     if (isNearGray(...rgb)) return false;
     if (isGenericColor(entry.hex)) return false;
     return true;
   });
 
-  // Deduplicate similar colors
   const deduped = deduplicateColors(filtered);
-
-  // Sort by priority (lower first), then by count (higher first)
   deduped.sort((a, b) => a.priority - b.priority || b.count - a.count);
-
   const topColors = deduped.slice(0, 2).map((e) => e.hex);
 
-  return NextResponse.json({ colors: topColors, domain });
+  // Extract logo URL from header
+  const logoUrl = extractLogoUrl(html, normalized);
+
+  return NextResponse.json({ colors: topColors, domain, logoUrl });
 }
